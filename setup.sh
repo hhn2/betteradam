@@ -34,7 +34,7 @@ echo "Using: $PYTHON ($($PYTHON --version))"
 echo "=== 1/7  Creating Python 3.9 venv ==="
 "$PYTHON" -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
+pip install --upgrade pip setuptools wheel
 
 echo "=== 2/7  Installing pre-built PyAV (skip pkg-config/ffmpeg) ==="
 pip install av --only-binary av
@@ -45,7 +45,7 @@ if [ ! -d "OpenVoice" ]; then
 fi
 pip install -e OpenVoice --no-deps
 
-echo "=== 4/7  Installing MeloTTS + OpenVoice deps ==="
+echo "=== 4/7  Installing MeloTTS + all deps ==="
 pip install "faster-whisper>=1.0" --only-binary :all:
 pip install \
     "librosa==0.9.1" "pydub==0.25.1" "wavmark==0.0.3" "numpy==1.22.0" \
@@ -54,18 +54,23 @@ pip install \
     "jieba==0.42.1" "langid==1.1.6"
 pip install git+https://github.com/myshell-ai/MeloTTS.git
 pip install "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4"
-# Reinstall python-mecab-ko AFTER MeloTTS (MeloTTS installs mecab-python3 which
-# conflicts — we need to replace it with the Korean mecab for g2pkk)
-pip uninstall -y mecab-python3 2>/dev/null || true
-pip install python-mecab-ko python-mecab-ko-dic
+# Korean MeCab dictionary (works with mecab-python3 that MeloTTS already installs)
+pip install mecab-ko-dic
 python -m unidic download
 
-echo "=== 5/7  Patching MeloTTS HParams for compatibility ==="
-python -c "
-path = __import__('melo.utils', fromlist=['utils']).__file__
-with open(path) as f: src = f.read()
-old = '    def __getitem__(self, key):\n        return getattr(self, key)'
-new = '''    def __getitem__(self, key):
+echo "=== 5/7  Patching packages for compatibility ==="
+python << 'PATCH_SCRIPT'
+import os, site, textwrap
+sp = site.getsitepackages()[0]
+
+# --- Patch 1: MeloTTS HParams (handle int keys from newer huggingface_hub) ---
+melo_utils = os.path.join(sp, "melo", "utils.py")
+if os.path.isfile(melo_utils):
+    with open(melo_utils) as f:
+        src = f.read()
+    old = '    def __getitem__(self, key):\n        return getattr(self, key)'
+    new = textwrap.dedent('''\
+    def __getitem__(self, key):
         if isinstance(key, int):
             keys = list(self.__dict__.keys())
             if key < len(keys):
@@ -74,15 +79,105 @@ new = '''    def __getitem__(self, key):
         return getattr(self, key)
 
     def __iter__(self):
-        return iter(self.__dict__)'''
-if old in src:
-    with open(path, 'w') as f: f.write(src.replace(old, new))
-    print('  Patched.')
-else:
-    print('  Already patched or not needed.')
-"
+        return iter(self.__dict__)''')
+    new = '\n'.join('    ' + l if l.strip() else l for l in new.split('\n'))
+    if old in src:
+        with open(melo_utils, 'w') as f:
+            f.write(src.replace(old, new))
+        print("  Patched melo/utils.py (HParams)")
+    else:
+        print("  melo/utils.py already patched or not needed")
 
-echo "=== 6/7  Pre-downloading HuggingFace models ==="
+# --- Patch 2: g2pkk — use MeCab.Tagger + mecab-ko-dic for Korean POS ---
+# g2pkk normally requires 'python-mecab-ko' (provides 'mecab' package),
+# but that conflicts with 'mecab-python3' (provides 'MeCab' package)
+# on macOS case-insensitive filesystems.
+# Fix: (a) disable check_mecab auto-install, (b) patch get_mecab to use MeCab.Tagger.
+g2pkk_file = os.path.join(sp, "g2pkk", "g2pkk.py")
+if os.path.isfile(g2pkk_file):
+    with open(g2pkk_file) as f:
+        src = f.read()
+
+    # Patch 2a: Disable check_mecab auto-install of python-mecab-ko
+    old_check = ("    def check_mecab(self):\n"
+                 "        if platform.system()=='Windows':\n"
+                 "            spam_spec = importlib.util.find_spec(\"eunjeon\")\n"
+                 "            non_found = spam_spec is None\n"
+                 "            if non_found:\n"
+                 "                print(f'you have to install eunjeon. install it...')\n"
+                 "                p = subprocess.Popen('pip install eunjeon')\n"
+                 "                p.wait()\n"
+                 "        else:\n"
+                 "            spam_spec = importlib.util.find_spec(\"mecab\")\n"
+                 "            non_found = spam_spec is None\n"
+                 "            if non_found:\n"
+                 "                print(f'you have to install python-mecab-ko. install it...')\n"
+                 "                p = subprocess.Popen([sys.executable, \"-m\", \"pip\", \"install\", 'python-mecab-ko'])\n"
+                 "                p.wait()")
+    new_check = ("    def check_mecab(self):\n"
+                 "        # Patched: skip auto-install of python-mecab-ko (conflicts with mecab-python3)\n"
+                 "        pass")
+    if old_check in src:
+        src = src.replace(old_check, new_check)
+        print("  Patched g2pkk check_mecab (disabled auto-install)")
+    else:
+        print("  g2pkk check_mecab already patched or not found")
+
+    # Patch 2b: Replace get_mecab to use MeCab.Tagger + mecab-ko-dic
+    if "mecab_ko_dic" not in src:
+        # The original get_mecab tries to import 'mecab' (python-mecab-ko).
+        # We replace it to use MeCab.Tagger with Korean dictionary.
+        old_block = "m = self.load_module_func('mecab')\n                return m.MeCab()"
+        new_block = textwrap.dedent("""\
+            import MeCab as _M
+            try:
+                from mecab_ko_dic.ipadic import DICDIR as _dicdir
+            except ImportError:
+                _dicdir = None
+
+            class _KoMeCabWrapper:
+                def __init__(self):
+                    if _dicdir:
+                        self._t = _M.Tagger(f'-d {_dicdir}')
+                    else:
+                        self._t = _M.Tagger()
+                def pos(self, text):
+                    node = self._t.parseToNode(text)
+                    tokens = []
+                    while node:
+                        if node.surface:
+                            feat = node.feature.split(',')
+                            tokens.append((node.surface, feat[0]))
+                        node = node.next
+                    return tokens
+            return _KoMeCabWrapper()""")
+        # Re-indent to match the original 16-space indent
+        new_block_lines = []
+        for line in new_block.split('\n'):
+            if line.strip():
+                new_block_lines.append(' ' * 16 + line.strip())
+            else:
+                new_block_lines.append('')
+        new_block = '\n'.join(new_block_lines)
+
+        if old_block in src:
+            src = src.replace(old_block, new_block)
+            print("  Patched g2pkk/g2pkk.py (Korean MeCab via MeCab.Tagger)")
+        else:
+            print("  WARNING: could not find expected code in g2pkk. Manual patching may be needed.")
+    else:
+        print("  g2pkk get_mecab already patched")
+
+    # Save any changes
+    with open(g2pkk_file, 'w') as f:
+        f.write(src)
+    print("  g2pkk file saved.")
+else:
+    print("  WARNING: g2pkk/g2pkk.py not found")
+PATCH_SCRIPT
+
+echo "=== 6/7  Pre-downloading models & checkpoints ==="
+unset HF_HUB_OFFLINE
 python -c "
 from huggingface_hub import snapshot_download
 for repo in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
@@ -91,8 +186,8 @@ for repo in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/ber
 print('  All models cached.')
 "
 
-echo "=== 6/7  Downloading OpenVoice V2 checkpoints ==="
 if [ ! -d "OpenVoice/checkpoints_v2" ]; then
+    echo "  Downloading OpenVoice V2 checkpoints..."
     curl -L -o /tmp/ckpt_v2.zip \
         "https://myshell-public-repo-host.s3.amazonaws.com/openvoice/checkpoints_v2_0417.zip"
     unzip -o /tmp/ckpt_v2.zip -d OpenVoice
@@ -105,45 +200,40 @@ python -c "import static_ffmpeg; static_ffmpeg.run.get_or_fetch_platform_executa
 
 echo ""
 echo "=== Verifying installation ==="
-python -c "
+python << 'VERIFY'
 import sys
 errors = []
 
-# Check critical imports
-for mod, minver in [('torch', None), ('transformers', '4.27'), ('tokenizers', '0.13'), ('huggingface_hub', None)]:
+for mod in ['torch', 'transformers', 'tokenizers', 'huggingface_hub']:
     try:
         m = __import__(mod)
-        v = getattr(m, '__version__', '?')
-        print(f'  ✓ {mod} {v}')
+        print(f'  ✓ {mod} {getattr(m, "__version__", "ok")}')
     except Exception as e:
-        errors.append(f'{mod}: {e}')
-        print(f'  ✗ {mod}: {e}')
+        errors.append(f'{mod}: {e}'); print(f'  ✗ {mod}: {e}')
 
-# Check MeloTTS
 try:
-    from melo.api import TTS
-    print('  ✓ melo (MeloTTS)')
+    from melo.api import TTS; print('  ✓ melo (MeloTTS)')
 except Exception as e:
-    errors.append(f'melo: {e}')
-    print(f'  ✗ melo: {e}')
+    errors.append(f'melo: {e}'); print(f'  ✗ melo: {e}')
 
-# Check OpenVoice
 try:
-    from openvoice.api import ToneColorConverter
-    print('  ✓ openvoice')
+    from openvoice.api import ToneColorConverter; print('  ✓ openvoice')
 except Exception as e:
-    errors.append(f'openvoice: {e}')
-    print(f'  ✗ openvoice: {e}')
+    errors.append(f'openvoice: {e}'); print(f'  ✗ openvoice: {e}')
 
-# Check ffmpeg
+try:
+    from g2pkk import G2p
+    g = G2p()
+    result = g('테스트')
+    print(f'  ✓ g2pkk (Korean G2P) → {result}')
+except Exception as e:
+    errors.append(f'g2pkk: {e}'); print(f'  ✗ g2pkk: {e}')
+
 import shutil
-if shutil.which('ffmpeg'):
-    print(f'  ✓ ffmpeg: {shutil.which(\"ffmpeg\")}')
-else:
-    errors.append('ffmpeg not in PATH')
-    print('  ✗ ffmpeg not found (pydub needs it)')
+ff = shutil.which('ffmpeg')
+if ff: print(f'  ✓ ffmpeg ({ff})')
+else: errors.append('ffmpeg not in PATH'); print('  ✗ ffmpeg not found')
 
-# Check HuggingFace models are cached
 from transformers import AutoTokenizer
 for model in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
     try:
@@ -151,23 +241,12 @@ for model in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/be
         print(f'  ✓ model: {model}')
     except Exception:
         errors.append(f'model not cached: {model}')
-        print(f'  ✗ model not cached: {model}')
+        print(f'  ✗ model: {model}')
 
 if errors:
-    print()
-    print('⚠️  PROBLEMS FOUND — the server may not work:')
-    for e in errors:
-        print(f'   • {e}')
+    print(f'\n⚠️  {len(errors)} PROBLEM(S):')
+    for e in errors: print(f'   • {e}')
     sys.exit(1)
 else:
-    print()
-    print('All checks passed!')
-"
-
-echo ""
-echo "============================================"
-echo "  Setup complete!  Run the server with:"
-echo ""
-echo "    source .venv/bin/activate"
-echo "    ./run.sh"
-echo "============================================"
+    print('\n✅ All checks passed! Run the server with: ./run.sh')
+VERIFY
