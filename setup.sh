@@ -61,7 +61,16 @@ python -c "
 path = __import__('melo.utils', fromlist=['utils']).__file__
 with open(path) as f: src = f.read()
 old = '    def __getitem__(self, key):\n        return getattr(self, key)'
-new = '    def __getitem__(self, key):\n        if not isinstance(key, str): raise TypeError(f\"HParams key must be str, got {type(key).__name__}\")\n        return getattr(self, key)'
+new = '''    def __getitem__(self, key):
+        if isinstance(key, int):
+            keys = list(self.__dict__.keys())
+            if key < len(keys):
+                return self.__dict__[keys[key]]
+            raise IndexError(key)
+        return getattr(self, key)
+
+    def __iter__(self):
+        return iter(self.__dict__)'''
 if old in src:
     with open(path, 'w') as f: f.write(src.replace(old, new))
     print('  Patched.')
