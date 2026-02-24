@@ -37,7 +37,8 @@ source .venv/bin/activate
 pip install --upgrade pip setuptools wheel
 
 echo "=== 2/7  Installing pre-built PyAV (skip pkg-config/ffmpeg) ==="
-pip install av --only-binary av
+# av 15+ drops Python 3.9 Linux wheels; 14.2.0 has wheels for all platforms
+pip install "av==14.2.0" --only-binary :all:
 
 echo "=== 3/7  Cloning & installing OpenVoice ==="
 if [ ! -d "OpenVoice" ]; then
