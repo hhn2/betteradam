@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OpenVoice (cloned & built by setup.sh)
+OpenVoice/
+
+# Model cache
+.model_cache/
+
+# OS
+.DS_Store

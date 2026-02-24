@@ -9,7 +9,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from tts_engine import generate_korean_tts_american_accent
+try:
+    from tts_engine import generate_korean_tts_american_accent
+except ModuleNotFoundError:
+    from backend.tts_engine import generate_korean_tts_american_accent
 
 app = FastAPI(title="Korean TTS (American accent)")
 app.add_middleware(
