@@ -53,10 +53,23 @@ pip install \
     "whisper-timestamped==1.14.2" "pypinyin==0.50.0" "cn2an==0.5.22" \
     "jieba==0.42.1" "langid==1.1.6"
 pip install git+https://github.com/myshell-ai/MeloTTS.git
-pip install "transformers==4.27.4" "tokenizers==0.13.3"
+pip install "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4"
 python -m unidic download
 
-echo "=== 5/7  Pre-downloading HuggingFace models ==="
+echo "=== 5/7  Patching MeloTTS HParams for compatibility ==="
+python -c "
+path = __import__('melo.utils', fromlist=['utils']).__file__
+with open(path) as f: src = f.read()
+old = '    def __getitem__(self, key):\n        return getattr(self, key)'
+new = '    def __getitem__(self, key):\n        if not isinstance(key, str): raise TypeError(f\"HParams key must be str, got {type(key).__name__}\")\n        return getattr(self, key)'
+if old in src:
+    with open(path, 'w') as f: f.write(src.replace(old, new))
+    print('  Patched.')
+else:
+    print('  Already patched or not needed.')
+"
+
+echo "=== 6/7  Pre-downloading HuggingFace models ==="
 python -c "
 from huggingface_hub import snapshot_download
 for repo in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
