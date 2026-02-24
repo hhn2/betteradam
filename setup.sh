@@ -54,6 +54,10 @@ pip install \
     "jieba==0.42.1" "langid==1.1.6"
 pip install git+https://github.com/myshell-ai/MeloTTS.git
 pip install "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4"
+# Reinstall python-mecab-ko AFTER MeloTTS (MeloTTS installs mecab-python3 which
+# conflicts — we need to replace it with the Korean mecab for g2pkk)
+pip uninstall -y mecab-python3 2>/dev/null || true
+pip install python-mecab-ko python-mecab-ko-dic
 python -m unidic download
 
 echo "=== 5/7  Patching MeloTTS HParams for compatibility ==="
