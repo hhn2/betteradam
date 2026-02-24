@@ -29,7 +29,16 @@ pip install git+https://github.com/myshell-ai/MeloTTS.git
 pip install "transformers==4.27.4" "tokenizers==0.13.3"
 python -m unidic download
 
-echo "=== 5/6  Downloading OpenVoice V2 checkpoints ==="
+echo "=== 5/7  Pre-downloading HuggingFace models needed by MeloTTS ==="
+python -c "
+from huggingface_hub import snapshot_download
+for repo in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
+    print(f'  Downloading {repo}...')
+    snapshot_download(repo, ignore_patterns=['*.msgpack', '*.h5', '*.ot', 'tf_*', 'flax_*', 'rust_*'])
+print('  All models cached.')
+"
+
+echo "=== 6/7  Downloading OpenVoice V2 checkpoints ==="
 if [ ! -d "OpenVoice/checkpoints_v2" ]; then
     curl -L -o /tmp/ckpt_v2.zip \
         "https://myshell-public-repo-host.s3.amazonaws.com/openvoice/checkpoints_v2_0417.zip"
@@ -37,7 +46,7 @@ if [ ! -d "OpenVoice/checkpoints_v2" ]; then
     rm /tmp/ckpt_v2.zip
 fi
 
-echo "=== 6/6  Installing backend deps + static ffmpeg ==="
+echo "=== 7/7  Installing backend deps + static ffmpeg ==="
 pip install -r backend/requirements.txt static-ffmpeg
 python -c "import static_ffmpeg; static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()"
 
