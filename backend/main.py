@@ -3,8 +3,10 @@ FastAPI TTS service: Korean text -> MP3 with Texas/American accent (OpenVoice V2
 """
 import io
 import os
+import sys
+import traceback
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -57,7 +59,50 @@ def tts(request: TTSRequest):
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        tb = traceback.format_exc()
+        print(f"TTS ERROR:\n{tb}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}\n\n{tb}")
+
+
+@app.get("/api/debug")
+def debug():
+    """Diagnostic endpoint — open in browser to check what's working."""
+    results = {}
+
+    # 1. Check Python version
+    results["python"] = sys.version
+
+    # 2. Check OpenVoice
+    try:
+        openvoice_root = os.environ.get("OPENVOICE_ROOT", "not set")
+        results["OPENVOICE_ROOT"] = openvoice_root
+        ckpt = os.path.join(openvoice_root, "checkpoints_v2", "converter", "checkpoint.pth")
+        results["checkpoints_v2"] = "OK" if os.path.isfile(ckpt) else f"MISSING: {ckpt}"
+    except Exception as e:
+        results["openvoice"] = f"ERROR: {e}"
+
+    # 3. Check imports
+    for mod in ["torch", "openvoice", "melo", "pydub", "faster_whisper", "transformers", "tokenizers"]:
+        try:
+            m = __import__(mod)
+            ver = getattr(m, "__version__", "ok")
+            results[f"import_{mod}"] = ver
+        except Exception as e:
+            results[f"import_{mod}"] = f"ERROR: {e}"
+
+    # 4. Check ffmpeg
+    import shutil
+    results["ffmpeg"] = shutil.which("ffmpeg") or "NOT FOUND"
+
+    # 5. Check HuggingFace model cache
+    try:
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained("bert-base-uncased")
+        results["model_bert_base_uncased"] = "OK (cached)"
+    except Exception as e:
+        results["model_bert_base_uncased"] = f"ERROR: {e}"
+
+    return JSONResponse(results)
 
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
