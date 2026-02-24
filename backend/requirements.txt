@@ -1,0 +1,4 @@
+# This service runs alongside OpenVoice + MeloTTS (install those first; see README).
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydub>=0.25.1

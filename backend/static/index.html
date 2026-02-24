@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Korean TTS — American accent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&family=Noto+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --border: #2a2a2a;
+      --text: #e8e8e8;
+      --text-muted: #888;
+      --accent: #c9a227;
+      --accent-hover: #d4af37;
+      --error: #c94a4a;
+      --radius: 12px;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'DM Sans', 'Noto Sans KR', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .container {
+      width: 100%;
+      max-width: 520px;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 0 0 0.25rem 0;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.75rem;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      padding: 1rem 1.1rem;
+      font-family: 'Noto Sans KR', 'DM Sans', sans-serif;
+      font-size: 1rem;
+      line-height: 1.6;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      resize: vertical;
+      transition: border-color 0.2s;
+    }
+    textarea::placeholder {
+      color: var(--text-muted);
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      align-items: center;
+    }
+    button {
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 0.75rem 1.4rem;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    button:active {
+      transform: scale(0.98);
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--border);
+    }
+    .btn-secondary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .message {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      min-height: 1.4em;
+    }
+    .message.error {
+      color: var(--error);
+    }
+    .message.success {
+      color: var(--accent);
+    }
+    .player-section {
+      margin-top: 1.5rem;
+      padding: 1.25rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .player-section h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin: 0 0 0.75rem 0;
+      color: var(--text-muted);
+    }
+    audio {
+      width: 100%;
+      height: 40px;
+      margin-bottom: 0.75rem;
+    }
+    audio::-webkit-media-controls-panel {
+      background: var(--bg);
+    }
+    .download-wrap {
+      margin-top: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Korean TTS</h1>
+    <p class="subtitle">Texas American accent — type Korean, get an MP3 to play and download.</p>
+    <label for="text">Korean text</label>
+    <textarea
+      id="text"
+      placeholder="한국어 텍스트를 입력하세요..."
+      maxlength="5000"
+    ></textarea>
+    <div class="actions">
+      <button type="button" class="btn-primary" id="generate">Generate</button>
+      <button type="button" class="btn-secondary" id="download" disabled>Download MP3</button>
+    </div>
+    <p class="message" id="message" aria-live="polite"></p>
+    <section class="player-section" id="playerSection" hidden>
+      <h2>Output</h2>
+      <audio id="audio" controls></audio>
+      <div class="download-wrap">
+        <a id="downloadLink" href="#" download="tts_output.mp3" class="btn-secondary btn" style="display: inline-block; text-decoration: none;">Download MP3</a>
+      </div>
+    </section>
+  </div>
+  <script>
+    const textarea = document.getElementById('text');
+    const generateBtn = document.getElementById('generate');
+    const downloadBtn = document.getElementById('download');
+    const downloadLink = document.getElementById('downloadLink');
+    const messageEl = document.getElementById('message');
+    const playerSection = document.getElementById('playerSection');
+    const audio = document.getElementById('audio');
+
+    let lastBlob = null;
+
+    function setMessage(msg, isError = false) {
+      messageEl.textContent = msg;
+      messageEl.className = 'message' + (isError ? ' error' : ' success');
+    }
+
+    function clearMessage() {
+      messageEl.textContent = '';
+      messageEl.className = 'message';
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      const text = textarea.value.trim();
+      if (!text) {
+        setMessage('Enter some Korean text.', true);
+        return;
+      }
+      generateBtn.disabled = true;
+      downloadBtn.disabled = true;
+      clearMessage();
+      playerSection.hidden = true;
+      lastBlob = null;
+
+      try {
+        const base = window.location.origin;
+        const res = await fetch(base + '/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || res.statusText);
+        }
+        const blob = await res.blob();
+        lastBlob = blob;
+        const url = URL.createObjectURL(blob);
+        audio.src = url;
+        downloadLink.href = url;
+        downloadLink.download = 'tts_output.mp3';
+        playerSection.hidden = false;
+        downloadBtn.disabled = false;
+        setMessage('Ready. Play or download below.');
+      } catch (e) {
+        setMessage(e.message || 'Something went wrong.', true);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (lastBlob) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(lastBlob);
+        a.download = 'tts_output.mp3';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+    });
+  </script>
+</body>
+</html>
