@@ -100,6 +100,67 @@ pip install -r backend/requirements.txt static-ffmpeg
 python -c "import static_ffmpeg; static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()"
 
 echo ""
+echo "=== Verifying installation ==="
+python -c "
+import sys
+errors = []
+
+# Check critical imports
+for mod, minver in [('torch', None), ('transformers', '4.27'), ('tokenizers', '0.13'), ('huggingface_hub', None)]:
+    try:
+        m = __import__(mod)
+        v = getattr(m, '__version__', '?')
+        print(f'  ✓ {mod} {v}')
+    except Exception as e:
+        errors.append(f'{mod}: {e}')
+        print(f'  ✗ {mod}: {e}')
+
+# Check MeloTTS
+try:
+    from melo.api import TTS
+    print('  ✓ melo (MeloTTS)')
+except Exception as e:
+    errors.append(f'melo: {e}')
+    print(f'  ✗ melo: {e}')
+
+# Check OpenVoice
+try:
+    from openvoice.api import ToneColorConverter
+    print('  ✓ openvoice')
+except Exception as e:
+    errors.append(f'openvoice: {e}')
+    print(f'  ✗ openvoice: {e}')
+
+# Check ffmpeg
+import shutil
+if shutil.which('ffmpeg'):
+    print(f'  ✓ ffmpeg: {shutil.which(\"ffmpeg\")}')
+else:
+    errors.append('ffmpeg not in PATH')
+    print('  ✗ ffmpeg not found (pydub needs it)')
+
+# Check HuggingFace models are cached
+from transformers import AutoTokenizer
+for model in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
+    try:
+        AutoTokenizer.from_pretrained(model, local_files_only=True)
+        print(f'  ✓ model: {model}')
+    except Exception:
+        errors.append(f'model not cached: {model}')
+        print(f'  ✗ model not cached: {model}')
+
+if errors:
+    print()
+    print('⚠️  PROBLEMS FOUND — the server may not work:')
+    for e in errors:
+        print(f'   • {e}')
+    sys.exit(1)
+else:
+    print()
+    print('All checks passed!')
+"
+
+echo ""
 echo "============================================"
 echo "  Setup complete!  Run the server with:"
 echo ""
