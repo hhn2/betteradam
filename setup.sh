@@ -26,6 +26,7 @@ pip install \
     "whisper-timestamped==1.14.2" "pypinyin==0.50.0" "cn2an==0.5.22" \
     "jieba==0.42.1" "langid==1.1.6"
 pip install git+https://github.com/myshell-ai/MeloTTS.git
+pip install "transformers==4.27.4" "tokenizers==0.13.3"
 python -m unidic download
 
 echo "=== 5/6  Downloading OpenVoice V2 checkpoints ==="
