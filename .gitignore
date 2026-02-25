@@ -7,6 +7,9 @@ __pycache__/
 # OpenVoice (cloned & built by setup.sh)
 OpenVoice/
 
+# MeloTTS source (shallow-cloned by setup.sh)
+_melotts_src/
+
 # Model cache
 .model_cache/
 

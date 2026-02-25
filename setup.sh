@@ -42,22 +42,37 @@ pip install "av==14.2.0" --only-binary :all:
 
 echo "=== 3/7  Cloning & installing OpenVoice ==="
 if [ ! -d "OpenVoice" ]; then
-    git clone https://github.com/myshell-ai/OpenVoice.git
+    git clone --depth 1 https://github.com/myshell-ai/OpenVoice.git
 fi
 pip install -e OpenVoice --no-deps
 
 echo "=== 4/7  Installing MeloTTS + all deps ==="
-pip install "faster-whisper>=1.0" --only-binary :all:
-pip install \
+# Install all Python deps in ONE pip call (faster dependency resolution)
+pip install --prefer-binary \
+    "faster-whisper>=1.0" \
     "librosa==0.9.1" "pydub==0.25.1" "wavmark==0.0.3" "numpy==1.22.0" \
     "eng_to_ipa==0.0.2" "inflect==7.0.0" "unidecode==1.3.7" \
     "whisper-timestamped==1.14.2" "pypinyin==0.50.0" "cn2an==0.5.22" \
-    "jieba==0.42.1" "langid==1.1.6"
-pip install git+https://github.com/myshell-ai/MeloTTS.git
-pip install "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4"
-# Korean MeCab dictionary (works with mecab-python3 that MeloTTS already installs)
-pip install mecab-ko-dic
-python -m unidic download
+    "jieba==0.42.1" "langid==1.1.6" \
+    "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4" \
+    mecab-ko-dic
+
+# Shallow-clone MeloTTS (faster than pip install git+…, which clones full history)
+if [ ! -d "_melotts_src" ]; then
+    git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git _melotts_src
+fi
+pip install --no-deps ./_melotts_src
+
+# unidic-lite is installed by MeloTTS and is enough for Japanese tokenisation.
+# The full unidic download (785 MB) is only needed if unidic-lite doesn't work.
+python -c "
+import importlib, subprocess, sys
+try:
+    import unidic_lite; print('  unidic-lite present — skipping full unidic download')
+except ImportError:
+    print('  Downloading full unidic dictionary (this may take a minute)...')
+    subprocess.check_call([sys.executable, '-m', 'unidic', 'download'])
+"
 
 echo "=== 5/7  Patching packages for compatibility ==="
 python << 'PATCH_SCRIPT'
