@@ -69,8 +69,8 @@ sp = site.getsitepackages()[0]
 
 # --- Patch 1: MeloTTS HParams (handle int keys from newer huggingface_hub) ---
 def _normalize_crlf(text):
-    """Convert \\r\\n or bare \\r to \\n so string-matching patches work."""
-    return text.replace('\\r\\n', '\\n').replace('\\r', '\\n')
+    """Convert CR/LF or bare CR to LF so string-matching patches work."""
+    return text.replace('\r\n', '\n').replace('\r', '\n')
 
 melo_utils = os.path.join(sp, "melo", "utils.py")
 if os.path.isfile(melo_utils):
@@ -133,7 +133,7 @@ if os.path.isfile(g2pkk_file):
 
     # Patch 2b: Replace get_mecab to use MeCab.Tagger + mecab-ko-dic
     if "mecab_ko_dic" not in src:
-        old_block = "m = self.load_module_func('mecab')\n                return m.MeCab()"
+        old_block = "                m = self.load_module_func('mecab')\n                return m.MeCab()"
         # Pre-formatted with correct indentation (16 spaces base)
         new_block = (
             "                import MeCab as _M\n"
