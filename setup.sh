@@ -31,42 +31,38 @@ fi
 
 echo "Using: $PYTHON ($($PYTHON --version))"
 
-echo "=== 1/7  Creating Python 3.9 venv ==="
+echo "=== 1/6  Creating Python 3.9 venv ==="
 "$PYTHON" -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip setuptools wheel
 
-echo "=== 2/7  Installing pre-built PyAV (skip pkg-config/ffmpeg) ==="
-# av 15+ drops Python 3.9 Linux wheels; 14.2.0 has wheels for all platforms
-pip install "av==14.2.0" --only-binary :all:
-
-echo "=== 3/7  Cloning & installing OpenVoice ==="
+echo "=== 2/6  Cloning & installing OpenVoice ==="
 if [ ! -d "OpenVoice" ]; then
     git clone --depth 1 https://github.com/myshell-ai/OpenVoice.git
 fi
 pip install -e OpenVoice --no-deps
 
-echo "=== 4/7  Installing MeloTTS + all deps ==="
-# Install all Python deps in ONE pip call (faster dependency resolution)
-pip install --prefer-binary \
-    "faster-whisper>=1.0" \
-    "librosa==0.9.1" "pydub==0.25.1" "wavmark==0.0.3" "numpy==1.22.0" \
-    "eng_to_ipa==0.0.2" "inflect==7.0.0" "unidecode==1.3.7" \
-    "whisper-timestamped==1.14.2" "pypinyin==0.50.0" "cn2an==0.5.22" \
-    "jieba==0.42.1" "langid==1.1.6" \
-    "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4" \
-    mecab-ko-dic
-
+echo "=== 3/6  Installing MeloTTS + all deps ==="
 # Shallow-clone MeloTTS (faster than pip install git+…, which clones full history)
 if [ ! -d "_melotts_src" ]; then
     git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git _melotts_src
 fi
-pip install --no-deps ./_melotts_src
+# Let pip resolve the full dep tree (--no-deps caused missing packages)
+pip install --prefer-binary ./_melotts_src
+
+# Pin versions that must match for compatibility
+pip install --prefer-binary \
+    "av==14.2.0" \
+    "faster-whisper>=1.0" \
+    "wavmark==0.0.3" "numpy==1.22.0" \
+    "whisper-timestamped==1.14.2" \
+    "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4" \
+    mecab-ko-dic
 
 # unidic-lite is installed by MeloTTS and is enough for Japanese tokenisation.
 # The full unidic download (785 MB) is only needed if unidic-lite doesn't work.
 python -c "
-import importlib, subprocess, sys
+import subprocess, sys
 try:
     import unidic_lite; print('  unidic-lite present — skipping full unidic download')
 except ImportError:
@@ -74,7 +70,7 @@ except ImportError:
     subprocess.check_call([sys.executable, '-m', 'unidic', 'download'])
 "
 
-echo "=== 5/7  Patching packages for compatibility ==="
+echo "=== 4/6  Patching packages for compatibility ==="
 python << 'PATCH_SCRIPT'
 import os, site, textwrap
 sp = site.getsitepackages()[0]
@@ -192,7 +188,7 @@ else:
     print("  WARNING: g2pkk/g2pkk.py not found")
 PATCH_SCRIPT
 
-echo "=== 6/7  Pre-downloading models & checkpoints ==="
+echo "=== 5/6  Pre-downloading models & checkpoints ==="
 unset HF_HUB_OFFLINE
 python -c "
 from huggingface_hub import snapshot_download
@@ -210,7 +206,7 @@ if [ ! -d "OpenVoice/checkpoints_v2" ]; then
     rm /tmp/ckpt_v2.zip
 fi
 
-echo "=== 7/7  Installing backend deps + static ffmpeg ==="
+echo "=== 6/6  Installing backend deps + static ffmpeg ==="
 pip install -r backend/requirements.txt static-ffmpeg
 python -c "import static_ffmpeg; static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()"
 
