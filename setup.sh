@@ -50,6 +50,9 @@ fi
 # Let pip resolve the full dep tree (--no-deps caused missing packages)
 pip install --prefer-binary ./_melotts_src
 
+# Ensure setuptools is present (MeloTTS deps can break pkg_resources)
+pip install --force-reinstall setuptools
+
 # Pin versions that must match for compatibility
 pip install --prefer-binary \
     "av==14.2.0" \
@@ -137,40 +140,32 @@ if os.path.isfile(g2pkk_file):
 
     # Patch 2b: Replace get_mecab to use MeCab.Tagger + mecab-ko-dic
     if "mecab_ko_dic" not in src:
-        # The original get_mecab tries to import 'mecab' (python-mecab-ko).
-        # We replace it to use MeCab.Tagger with Korean dictionary.
         old_block = "m = self.load_module_func('mecab')\n                return m.MeCab()"
-        new_block = textwrap.dedent("""\
-            import MeCab as _M
-            try:
-                from mecab_ko_dic.ipadic import DICDIR as _dicdir
-            except ImportError:
-                _dicdir = None
-
-            class _KoMeCabWrapper:
-                def __init__(self):
-                    if _dicdir:
-                        self._t = _M.Tagger(f'-d {_dicdir}')
-                    else:
-                        self._t = _M.Tagger()
-                def pos(self, text):
-                    node = self._t.parseToNode(text)
-                    tokens = []
-                    while node:
-                        if node.surface:
-                            feat = node.feature.split(',')
-                            tokens.append((node.surface, feat[0]))
-                        node = node.next
-                    return tokens
-            return _KoMeCabWrapper()""")
-        # Re-indent to match the original 16-space indent
-        new_block_lines = []
-        for line in new_block.split('\n'):
-            if line.strip():
-                new_block_lines.append(' ' * 16 + line.strip())
-            else:
-                new_block_lines.append('')
-        new_block = '\n'.join(new_block_lines)
+        # Pre-formatted with correct indentation (16 spaces base)
+        new_block = (
+            "                import MeCab as _M\n"
+            "                try:\n"
+            "                    from mecab_ko_dic.ipadic import DICDIR as _dicdir\n"
+            "                except ImportError:\n"
+            "                    _dicdir = None\n"
+            "\n"
+            "                class _KoMeCabWrapper:\n"
+            "                    def __init__(self):\n"
+            "                        if _dicdir:\n"
+            "                            self._t = _M.Tagger(f'-d {_dicdir}')\n"
+            "                        else:\n"
+            "                            self._t = _M.Tagger()\n"
+            "                    def pos(self, text):\n"
+            "                        node = self._t.parseToNode(text)\n"
+            "                        tokens = []\n"
+            "                        while node:\n"
+            "                            if node.surface:\n"
+            "                                feat = node.feature.split(',')\n"
+            "                                tokens.append((node.surface, feat[0]))\n"
+            "                            node = node.next\n"
+            "                        return tokens\n"
+            "                return _KoMeCabWrapper()"
+        )
 
         if old_block in src:
             src = src.replace(old_block, new_block)
