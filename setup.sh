@@ -62,17 +62,6 @@ pip install --prefer-binary \
     "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4" \
     mecab-ko-dic
 
-# unidic-lite is installed by MeloTTS and is enough for Japanese tokenisation.
-# The full unidic download (785 MB) is only needed if unidic-lite doesn't work.
-python -c "
-import subprocess, sys
-try:
-    import unidic_lite; print('  unidic-lite present — skipping full unidic download')
-except ImportError:
-    print('  Downloading full unidic dictionary (this may take a minute)...')
-    subprocess.check_call([sys.executable, '-m', 'unidic', 'download'])
-"
-
 echo "=== 4/6  Patching packages for compatibility ==="
 python << 'PATCH_SCRIPT'
 import os, site, textwrap
@@ -181,16 +170,101 @@ if os.path.isfile(g2pkk_file):
     print("  g2pkk file saved.")
 else:
     print("  WARNING: g2pkk/g2pkk.py not found")
+
+# --- Patch 3: MeloTTS cleaner.py — lazy-import language modules ---
+# By default cleaner.py does `from . import chinese, japanese, english, ...`
+# which forces japanese.py to load MeCab at import time even for Korean-only usage.
+# Fix: overwrite with lazy-import version so only the requested language is loaded.
+cleaner_file = os.path.join(sp, "melo", "text", "cleaner.py")
+if os.path.isfile(cleaner_file):
+    with open(cleaner_file) as f:
+        src = f.read()
+    if "from . import chinese, japanese" in src:
+        with open(cleaner_file, 'w') as f:
+            f.write(textwrap.dedent('''\
+                from . import cleaned_text_to_sequence
+                import copy
+                import importlib
+
+                _LANG_MODULE_NAMES = {
+                    'ZH': 'chinese', 'JP': 'japanese', 'EN': 'english',
+                    'ZH_MIX_EN': 'chinese_mix', 'KR': 'korean',
+                    'FR': 'french', 'SP': 'spanish', 'ES': 'spanish',
+                }
+                _loaded = {}
+
+                def _get_language_module(language):
+                    if language not in _loaded:
+                        name = _LANG_MODULE_NAMES[language]
+                        _loaded[language] = importlib.import_module('.' + name, package='melo.text')
+                    return _loaded[language]
+
+                class _LazyMap(dict):
+                    def __getitem__(self, key):
+                        return _get_language_module(key)
+                    def __contains__(self, key):
+                        return key in _LANG_MODULE_NAMES
+
+                language_module_map = _LazyMap()
+
+
+                def clean_text(text, language):
+                    language_module = language_module_map[language]
+                    norm_text = language_module.text_normalize(text)
+                    phones, tones, word2ph = language_module.g2p(norm_text)
+                    return norm_text, phones, tones, word2ph
+
+
+                def clean_text_bert(text, language, device=None):
+                    language_module = language_module_map[language]
+                    norm_text = language_module.text_normalize(text)
+                    phones, tones, word2ph = language_module.g2p(norm_text)
+
+                    word2ph_bak = copy.deepcopy(word2ph)
+                    for i in range(len(word2ph)):
+                        word2ph[i] = word2ph[i] * 2
+                    word2ph[0] += 1
+                    bert = language_module.get_bert_feature(norm_text, word2ph, device=device)
+
+                    return norm_text, phones, tones, word2ph_bak, bert
+
+
+                def text_to_sequence(text, language):
+                    norm_text, phones, tones, word2ph = clean_text(text, language)
+                    return cleaned_text_to_sequence(phones, tones, language)
+
+
+                if __name__ == "__main__":
+                    pass
+            '''))
+        print("  Patched melo/text/cleaner.py (lazy language imports — no more Japanese at startup)")
+    else:
+        print("  melo/text/cleaner.py already patched")
+else:
+    print("  WARNING: melo/text/cleaner.py not found")
+
+# --- Create mecabrc pointing to Korean dictionary (belt & suspenders) ---
+import shutil
+mecabrc_path = os.path.join(os.path.dirname(sp), '..', '..', '..', 'mecabrc')
+mecabrc_path = os.path.normpath(os.path.join(os.environ.get('VIRTUAL_ENV', sp), 'mecabrc'))
+try:
+    from mecab_ko_dic.ipadic import DICDIR
+    with open(mecabrc_path, 'w') as f:
+        f.write(f'dicdir = {DICDIR}\n')
+    print(f"  Created mecabrc at {mecabrc_path} → {DICDIR}")
+except Exception as e:
+    print(f"  WARNING: could not create mecabrc: {e}")
 PATCH_SCRIPT
 
 echo "=== 5/6  Pre-downloading models & checkpoints ==="
 unset HF_HUB_OFFLINE
 python -c "
 from huggingface_hub import snapshot_download
-for repo in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
+# Only Korean BERT model is needed (Japanese/English are not used)
+for repo in ['kykim/bert-kor-base']:
     print(f'  Downloading {repo}...')
     snapshot_download(repo, ignore_patterns=['*.msgpack', '*.h5', '*.ot', 'tf_*', 'flax_*', 'rust_*'])
-print('  All models cached.')
+print('  Korean model cached.')
 "
 
 if [ ! -d "OpenVoice/checkpoints_v2" ]; then
@@ -207,6 +281,7 @@ python -c "import static_ffmpeg; static_ffmpeg.run.get_or_fetch_platform_executa
 
 echo ""
 echo "=== Verifying installation ==="
+export MECABRC="$(pwd)/.venv/mecabrc"
 python << 'VERIFY'
 import sys
 errors = []
@@ -242,7 +317,7 @@ if ff: print(f'  ✓ ffmpeg ({ff})')
 else: errors.append('ffmpeg not in PATH'); print('  ✗ ffmpeg not found')
 
 from transformers import AutoTokenizer
-for model in ['bert-base-uncased', 'tohoku-nlp/bert-base-japanese-v3', 'kykim/bert-kor-base']:
+for model in ['kykim/bert-kor-base']:
     try:
         AutoTokenizer.from_pretrained(model, local_files_only=True)
         print(f'  ✓ model: {model}')

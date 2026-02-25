@@ -94,13 +94,13 @@ def debug():
     import shutil
     results["ffmpeg"] = shutil.which("ffmpeg") or "NOT FOUND"
 
-    # 5. Check HuggingFace model cache
+    # 5. Check HuggingFace model cache (Korean only)
     try:
         from transformers import AutoTokenizer
-        tok = AutoTokenizer.from_pretrained("bert-base-uncased")
-        results["model_bert_base_uncased"] = "OK (cached)"
+        tok = AutoTokenizer.from_pretrained("kykim/bert-kor-base")
+        results["model_bert_kor_base"] = "OK (cached)"
     except Exception as e:
-        results["model_bert_base_uncased"] = f"ERROR: {e}"
+        results["model_bert_kor_base"] = f"ERROR: {e}"
 
     return JSONResponse(results)
 
