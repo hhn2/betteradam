@@ -68,10 +68,14 @@ import os, site, textwrap
 sp = site.getsitepackages()[0]
 
 # --- Patch 1: MeloTTS HParams (handle int keys from newer huggingface_hub) ---
+def _normalize_crlf(text):
+    """Convert \\r\\n or bare \\r to \\n so string-matching patches work."""
+    return text.replace('\\r\\n', '\\n').replace('\\r', '\\n')
+
 melo_utils = os.path.join(sp, "melo", "utils.py")
 if os.path.isfile(melo_utils):
     with open(melo_utils) as f:
-        src = f.read()
+        src = _normalize_crlf(f.read())
     old = '    def __getitem__(self, key):\n        return getattr(self, key)'
     new = textwrap.dedent('''\
     def __getitem__(self, key):
@@ -100,7 +104,7 @@ if os.path.isfile(melo_utils):
 g2pkk_file = os.path.join(sp, "g2pkk", "g2pkk.py")
 if os.path.isfile(g2pkk_file):
     with open(g2pkk_file) as f:
-        src = f.read()
+        src = _normalize_crlf(f.read())
 
     # Patch 2a: Disable check_mecab auto-install of python-mecab-ko
     old_check = ("    def check_mecab(self):\n"
@@ -178,7 +182,7 @@ else:
 cleaner_file = os.path.join(sp, "melo", "text", "cleaner.py")
 if os.path.isfile(cleaner_file):
     with open(cleaner_file) as f:
-        src = f.read()
+        src = _normalize_crlf(f.read())
     if "from . import chinese, japanese" in src:
         with open(cleaner_file, 'w') as f:
             f.write(textwrap.dedent('''\
