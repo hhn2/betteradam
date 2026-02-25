@@ -34,7 +34,7 @@ echo "Using: $PYTHON ($($PYTHON --version))"
 echo "=== 1/6  Creating Python 3.9 venv ==="
 "$PYTHON" -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip setuptools wheel
+pip install --upgrade pip "setuptools<82" wheel
 
 echo "=== 2/6  Cloning & installing OpenVoice ==="
 if [ ! -d "OpenVoice" ]; then
@@ -50,8 +50,8 @@ fi
 # Let pip resolve the full dep tree (--no-deps caused missing packages)
 pip install --prefer-binary ./_melotts_src
 
-# Ensure setuptools is present (MeloTTS deps can break pkg_resources)
-pip install --force-reinstall setuptools
+# Ensure setuptools is present (v82+ removed pkg_resources; pin to <82)
+pip install --force-reinstall "setuptools<82"
 
 # Pin versions that must match for compatibility
 pip install --prefer-binary \
