@@ -60,11 +60,29 @@ pip install --prefer-binary \
     "wavmark==0.0.3" "numpy==1.22.0" \
     "whisper-timestamped==1.14.2" \
     "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4" \
-    mecab-ko-dic
+    mecab-ko-dic mecab-python3
 
 # Force-reinstall g2pkk so we always patch a CLEAN file
 # (prior broken runs may have left a corrupted g2pkk.py in site-packages)
 pip install --force-reinstall --no-deps g2pkk
+
+# Ensure system mecab library is available (needed by mecab-python3)
+if [[ "$(uname)" == "Darwin" ]]; then
+    if ! command -v mecab &>/dev/null; then
+        echo "  Installing mecab via Homebrew..."
+        if command -v brew &>/dev/null; then
+            brew install mecab
+        else
+            echo "  WARNING: Homebrew not found. Install mecab manually: brew install mecab"
+        fi
+    fi
+elif [[ "$(uname)" == "Linux" ]]; then
+    if ! command -v mecab &>/dev/null; then
+        echo "  Installing mecab via apt..."
+        sudo apt-get install -y mecab libmecab-dev 2>/dev/null || \
+            echo "  WARNING: Could not install mecab. Install manually: sudo apt install mecab libmecab-dev"
+    fi
+fi
 
 echo "=== 4/6  Patching packages for compatibility ==="
 python << 'PATCH_SCRIPT'
@@ -101,81 +119,116 @@ if os.path.isfile(melo_utils):
     else:
         print("  melo/utils.py already patched or not needed")
 
-# --- Patch 2: g2pkk — use MeCab.Tagger + mecab-ko-dic for Korean POS ---
-# g2pkk normally requires 'python-mecab-ko' (provides 'mecab' package),
-# but that conflicts with 'mecab-python3' (provides 'MeCab' package)
-# on macOS case-insensitive filesystems.
-# Fix: (a) disable check_mecab auto-install, (b) patch get_mecab to use MeCab.Tagger.
+# --- Patch 2: g2pkk — replace entire file with version using MeCab.Tagger ---
+# The original g2pkk requires 'python-mecab-ko' which conflicts with 'mecab-python3'
+# on macOS case-insensitive filesystem. Also, get_mecab() silently returns None on error.
+# Fix: overwrite the entire file with a corrected version.
 g2pkk_file = os.path.join(sp, "g2pkk", "g2pkk.py")
 if os.path.isfile(g2pkk_file):
-    src = _read_clean(g2pkk_file)
-
-    # Patch 2a: Disable check_mecab auto-install of python-mecab-ko
-    old_check = ("    def check_mecab(self):\n"
-                 "        if platform.system()=='Windows':\n"
-                 "            spam_spec = importlib.util.find_spec(\"eunjeon\")\n"
-                 "            non_found = spam_spec is None\n"
-                 "            if non_found:\n"
-                 "                print(f'you have to install eunjeon. install it...')\n"
-                 "                p = subprocess.Popen('pip install eunjeon')\n"
-                 "                p.wait()\n"
-                 "        else:\n"
-                 "            spam_spec = importlib.util.find_spec(\"mecab\")\n"
-                 "            non_found = spam_spec is None\n"
-                 "            if non_found:\n"
-                 "                print(f'you have to install python-mecab-ko. install it...')\n"
-                 "                p = subprocess.Popen([sys.executable, \"-m\", \"pip\", \"install\", 'python-mecab-ko'])\n"
-                 "                p.wait()")
-    new_check = ("    def check_mecab(self):\n"
-                 "        # Patched: skip auto-install of python-mecab-ko (conflicts with mecab-python3)\n"
-                 "        pass")
-    if old_check in src:
-        src = src.replace(old_check, new_check)
-        print("  Patched g2pkk check_mecab (disabled auto-install)")
-    else:
-        print("  g2pkk check_mecab already patched or not found")
-
-    # Patch 2b: Replace get_mecab to use MeCab.Tagger + mecab-ko-dic
-    if "mecab_ko_dic" not in src:
-        old_block = "                m = self.load_module_func('mecab')\n                return m.MeCab()"
-        # Pre-formatted with correct indentation (16 spaces base)
-        new_block = (
-            "                import MeCab as _M\n"
-            "                try:\n"
-            "                    from mecab_ko_dic.ipadic import DICDIR as _dicdir\n"
-            "                except ImportError:\n"
-            "                    _dicdir = None\n"
-            "\n"
-            "                class _KoMeCabWrapper:\n"
-            "                    def __init__(self):\n"
-            "                        if _dicdir:\n"
-            "                            self._t = _M.Tagger(f'-d {_dicdir}')\n"
-            "                        else:\n"
-            "                            self._t = _M.Tagger()\n"
-            "                    def pos(self, text):\n"
-            "                        node = self._t.parseToNode(text)\n"
-            "                        tokens = []\n"
-            "                        while node:\n"
-            "                            if node.surface:\n"
-            "                                feat = node.feature.split(',')\n"
-            "                                tokens.append((node.surface, feat[0]))\n"
-            "                            node = node.next\n"
-            "                        return tokens\n"
-            "                return _KoMeCabWrapper()"
-        )
-
-        if old_block in src:
-            src = src.replace(old_block, new_block)
-            print("  Patched g2pkk/g2pkk.py (Korean MeCab via MeCab.Tagger)")
-        else:
-            print("  WARNING: could not find expected code in g2pkk. Manual patching may be needed.")
-    else:
-        print("  g2pkk get_mecab already patched")
-
-    # Save any changes
     with open(g2pkk_file, 'w') as f:
-        f.write(src)
-    print("  g2pkk file saved.")
+        f.write('''\
+# -*- coding: utf-8 -*-
+# Patched by betteradam setup.sh — uses mecab-python3 + mecab-ko-dic
+# instead of python-mecab-ko (which conflicts on macOS case-insensitive FS).
+
+import os, re, platform, sys, importlib
+import subprocess
+
+import nltk
+from jamo import h2j
+from nltk.corpus import cmudict
+
+try:
+    nltk.data.find('corpora/cmudict.zip')
+except LookupError:
+    nltk.download('cmudict')
+
+from g2pkk.special import jyeo, ye, consonant_ui, josa_ui, vowel_ui, jamo, rieulgiyeok, rieulbieub, verb_nieun, balb, palatalize, modifying_rieul
+from g2pkk.regular import link1, link2, link3, link4
+from g2pkk.utils import annotate, compose, group, gloss, parse_table, get_rule_id2text
+from g2pkk.english import convert_eng
+from g2pkk.numerals import convert_num
+
+
+class G2p(object):
+    def __init__(self):
+        self.mecab = self._make_mecab()
+        self.table = parse_table()
+        self.cmu = cmudict.dict()
+        self.rule2text = get_rule_id2text()
+        self.idioms_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "idioms.txt")
+
+    @staticmethod
+    def _make_mecab():
+        """Return a MeCab wrapper with a .pos() method, using mecab-python3 + mecab-ko-dic."""
+        import MeCab as _M
+        try:
+            from mecab_ko_dic.ipadic import DICDIR as _dicdir
+        except ImportError:
+            _dicdir = None
+
+        class _KoMeCabWrapper:
+            def __init__(self):
+                if _dicdir:
+                    self._t = _M.Tagger(f"-d {_dicdir}")
+                else:
+                    self._t = _M.Tagger()
+            def pos(self, text):
+                node = self._t.parseToNode(text)
+                tokens = []
+                while node:
+                    if node.surface:
+                        feat = node.feature.split(",")
+                        tokens.append((node.surface, feat[0]))
+                    node = node.next
+                return tokens
+
+        return _KoMeCabWrapper()
+
+    def idioms(self, string, descriptive=False, verbose=False):
+        rule = "from idioms.txt"
+        out = string
+        with open(self.idioms_path, 'r', encoding="utf8") as f:
+            for line in f:
+                line = line.split("#")[0].strip()
+                if "===" in line:
+                    str1, str2 = line.split("===")
+                    out = re.sub(str1, str2, out)
+            gloss(verbose, out, string, rule)
+        return out
+
+    def __call__(self, string, descriptive=False, verbose=False, group_vowels=False, to_syl=True):
+        string = self.idioms(string, descriptive, verbose)
+        string = convert_eng(string, self.cmu)
+        string = annotate(string, self.mecab)
+        string = convert_num(string)
+        inp = h2j(string)
+        for func in (jyeo, ye, consonant_ui, josa_ui, vowel_ui,
+                     jamo, rieulgiyeok, rieulbieub, verb_nieun,
+                     balb, palatalize, modifying_rieul):
+            inp = func(inp, descriptive, verbose)
+        inp = re.sub("/[PJEB]", "", inp)
+        for str1, str2, rule_ids in self.table:
+            _inp = inp
+            inp = re.sub(str1, str2, inp)
+            if len(rule_ids) > 0:
+                rule = "\\n".join(self.rule2text.get(rule_id, "") for rule_id in rule_ids)
+            else:
+                rule = ""
+            gloss(verbose, inp, _inp, rule)
+        for func in (link1, link2, link3, link4):
+            inp = func(inp, descriptive, verbose)
+        if group_vowels:
+            inp = group(inp)
+        if to_syl:
+            inp = compose(inp)
+        return inp
+
+if __name__ == "__main__":
+    g2p = G2p()
+    g2p("\\ub098\\uc758 \\uce5c\\uad6c\\uac00 mp3 file 3\\uac1c\\ub97c \\ub2e4\\uc6b4\\ubc1b\\uace0 \\uc788\\ub2e4")
+''')
+    print("  Wrote complete patched g2pkk/g2pkk.py (MeCab.Tagger + mecab-ko-dic)")
 else:
     print("  WARNING: g2pkk/g2pkk.py not found")
 
