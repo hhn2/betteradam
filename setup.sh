@@ -62,20 +62,25 @@ pip install --prefer-binary \
     "transformers==4.27.4" "tokenizers==0.13.3" "huggingface_hub==0.21.4" \
     mecab-ko-dic
 
+# Force-reinstall g2pkk so we always patch a CLEAN file
+# (prior broken runs may have left a corrupted g2pkk.py in site-packages)
+pip install --force-reinstall --no-deps g2pkk
+
 echo "=== 4/6  Patching packages for compatibility ==="
 python << 'PATCH_SCRIPT'
 import os, site, textwrap
 sp = site.getsitepackages()[0]
 
-# --- Patch 1: MeloTTS HParams (handle int keys from newer huggingface_hub) ---
-def _normalize_crlf(text):
-    """Convert CR/LF or bare CR to LF so string-matching patches work."""
-    return text.replace('\r\n', '\n').replace('\r', '\n')
+def _read_clean(path):
+    """Read a file as raw bytes, normalize all CR/CRLF to LF, return str."""
+    with open(path, 'rb') as f:
+        raw = f.read()
+    return raw.replace(b'\r\n', b'\n').replace(b'\r', b'\n').decode('utf-8')
 
+# --- Patch 1: MeloTTS HParams (handle int keys from newer huggingface_hub) ---
 melo_utils = os.path.join(sp, "melo", "utils.py")
 if os.path.isfile(melo_utils):
-    with open(melo_utils) as f:
-        src = _normalize_crlf(f.read())
+    src = _read_clean(melo_utils)
     old = '    def __getitem__(self, key):\n        return getattr(self, key)'
     new = textwrap.dedent('''\
     def __getitem__(self, key):
@@ -103,8 +108,7 @@ if os.path.isfile(melo_utils):
 # Fix: (a) disable check_mecab auto-install, (b) patch get_mecab to use MeCab.Tagger.
 g2pkk_file = os.path.join(sp, "g2pkk", "g2pkk.py")
 if os.path.isfile(g2pkk_file):
-    with open(g2pkk_file) as f:
-        src = _normalize_crlf(f.read())
+    src = _read_clean(g2pkk_file)
 
     # Patch 2a: Disable check_mecab auto-install of python-mecab-ko
     old_check = ("    def check_mecab(self):\n"
@@ -181,8 +185,7 @@ else:
 # Fix: overwrite with lazy-import version so only the requested language is loaded.
 cleaner_file = os.path.join(sp, "melo", "text", "cleaner.py")
 if os.path.isfile(cleaner_file):
-    with open(cleaner_file) as f:
-        src = _normalize_crlf(f.read())
+    src = _read_clean(cleaner_file)
     if "from . import chinese, japanese" in src:
         with open(cleaner_file, 'w') as f:
             f.write(textwrap.dedent('''\
